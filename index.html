@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Голос — прототип</title>
+  <style>
+    :root {
+      --ink: #14120f;
+      --paper: #f3ede2;
+      --muted: #8a8276;
+      --accent: #e0a040;
+      --line: #2a2620;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--ink);
+      color: var(--paper);
+      font-family: Georgia, "Times New Roman", serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px;
+    }
+    h1 {
+      font-weight: 400;
+      font-size: 28px;
+      margin: 0 0 40px;
+      letter-spacing: -0.01em;
+    }
+    .mic {
+      width: 168px;
+      height: 168px;
+      border-radius: 50%;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      font: inherit;
+      font-size: 17px;
+      cursor: pointer;
+      transition: background 0.3s ease, color 0.3s ease, transform 0.2s ease;
+    }
+    .mic:hover { background: rgba(224, 160, 64, 0.08); }
+    .mic:active { transform: scale(0.97); }
+    .mic.listening {
+      background: var(--accent);
+      color: var(--ink);
+    }
+    .mic:focus-visible { outline: 2px solid var(--paper); outline-offset: 4px; }
+    #log {
+      margin-top: 40px;
+      font-size: 20px;
+      line-height: 1.5;
+      min-height: 90px;
+      max-width: 520px;
+      text-align: center;
+    }
+    .hint {
+      margin-top: 48px;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      padding-top: 20px;
+      max-width: 520px;
+    }
+    .hint b { font-weight: 400; color: var(--paper); }
+    @media (prefers-reduced-motion: reduce) {
+      .mic { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Голос</h1>
+  <button id="listen" class="mic">Говорить</button>
+  <div id="log" aria-live="polite"></div>
+  <div class="hint">
+    <b>Команды:</b> «открой ютуб», «открой карты», «позвони 87771234567», «который час».<br>
+    Работает в Chrome. Для микрофона нужен HTTPS.
+  </div>
+
+  <script>
+    const log = document.getElementById('log');
+    const button = document.getElementById('listen');
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    const apps = {
+      'ютуб': 'https://m.youtube.com',
+      'карты': 'https://maps.google.com',
+      'почта': 'https://mail.google.com',
+      'телеграм': 'https://t.me',
+      'вики': 'https://ru.wikipedia.org'
+    };
+
+    function say(text) {
+      log.textContent = text;
+      if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      }
+    }
+
+    function handleCommand(text) {
+      if (text.includes('открой')) {
+        for (const name in apps) {
+          if (text.includes(name)) {
+            say('Открываю ' + name);
+            window.location.href = apps[name];
+            return;
+          }
+        }
+        say('Не знаю такого приложения');
+      } else if (text.includes('позвони')) {
+        const number = text.replace(/\D/g, '');
+        if (number.length >= 5) {
+          say('Звоню');
+          window.location.href = 'tel:' + number;
+        } else {
+          say('Назовите номер цифрами');
+        }
+      } else if (text.includes('который час') || text.includes('время')) {
+        say('Сейчас ' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }));
+      } else {
+        say('Не поняла команду');
+      }
+    }
+
+    if (!SR) {
+      log.textContent = 'Браузер не поддерживает распознавание речи. Откройте в Chrome.';
+      button.disabled = true;
+    } else {
+      const recognition = new SR();
+      recognition.lang = 'ru-RU';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        button.classList.add('listening');
+        button.textContent = 'Слушаю';
+        log.textContent = '';
+      };
+
+      recognition.onend = () => {
+        button.classList.remove('listening');
+        button.textContent = 'Говорить';
+      };
+
+      recognition.onresult = (e) => {
+        const text = e.results[0][0].transcript.toLowerCase();
+        log.textContent = 'Вы сказали: ' + text;
+        handleCommand(text);
+      };
+
+      const messages = {
+        'not-allowed': 'Нет доступа к микрофону. Откройте страницу в Chrome и разрешите микрофон.',
+        'service-not-allowed': 'Нет доступа к микрофону. Откройте страницу в Chrome и разрешите микрофон.',
+        'no-speech': 'Я не услышала речь. Попробуйте ещё раз.',
+        'audio-capture': 'Микрофон не найден.',
+        'network': 'Нет связи с сервисом распознавания речи.'
+      };
+
+      let running = false;
+
+      recognition.onerror = (e) => {
+        log.textContent = messages[e.error] || ('Ошибка: ' + e.error);
+      };
+
+      recognition.onend = () => {
+        running = false;
+        button.classList.remove('listening');
+        button.textContent = 'Говорить';
+      };
+
+      button.addEventListener('click', () => {
+        if (running) return;
+        try {
+          recognition.start();
+          running = true;
+        } catch (err) {
+          log.textContent = 'Не удалось запустить микрофон. Попробуйте ещё раз.';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
